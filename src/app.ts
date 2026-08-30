@@ -3,16 +3,26 @@ import { config } from "./config/env.js";
 
 const app = express();
 
-const filterHeaders = (req: Request): Record<string, string> => {
+const filterHeaders = (
+  headerList: Headers | [string, unknown][],
+): Record<string, string> => {
   // they are hop-by-hop headers
   // meaningless to the target server
   // if forward these headers, some may cause error or conflicts
-  const skipHeaders = ["connection", "keep-alive", "transfer-encoding"];
+  const skipHeaders = [
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+  ];
 
   const headers: Record<string, string> = {};
-  const entries = Object.entries(req.headers);
 
-  for (const [key, value] of entries) {
+  for (const [key, value] of headerList) {
     if (
       !skipHeaders.includes(key.toLocaleLowerCase()) &&
       // skip undefined or array values
@@ -65,7 +75,7 @@ app.all("/{*path}", async (_req: Request, res: Response) => {
 
   const response = await fetch(targetUrl, {
     method: _req.method,
-    headers: filterHeaders(_req),
+    headers: filterHeaders(Object.entries(_req.headers)),
     body: body,
   });
 
@@ -74,6 +84,9 @@ app.all("/{*path}", async (_req: Request, res: Response) => {
 
   // set status code
   res.status(response.status);
+
+  // set respose header
+  res.set(filterHeaders(response.headers));
 
   // send body to client
   res.send(Buffer.from(resBody));
