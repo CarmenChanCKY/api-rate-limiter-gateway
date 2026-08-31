@@ -1,5 +1,10 @@
 import express, { type Request, type Response } from "express";
+import { apiReference } from "@scalar/express-api-reference";
+import swaggerJsdoc from "swagger-jsdoc";
 import { config } from "./config/env.js";
+import { swaggerOptions } from "./config/swagger.js";
+import { getAPIKey } from "./helper/api-key.js";
+import verifyAPIKeys from "./middleware/verify-api-key.js";
 
 const app = express();
 
@@ -18,6 +23,8 @@ const filterHeaders = (
     "trailer",
     "transfer-encoding",
     "upgrade",
+
+    "authorization"
   ];
 
   const headers: Record<string, string> = {};
@@ -65,8 +72,40 @@ const bufferBody = (req: Request): Promise<Buffer<ArrayBuffer> | undefined> => {
   });
 };
 
+/**
+ * @swagger
+ * /get-api:
+ *   get:
+ *     tags: [Getting Started]
+ *     summary: Get the API key
+ *     description: Returns the current runtime API key. No authentication required.
+ *     responses:
+ *       200:
+ *         description: The API key for authenticated requests
+ */
+app.get("/get-api", (_req: Request, res: Response) => {
+  return res.status(200).send(getAPIKey());
+});
+
+const spec = swaggerJsdoc(swaggerOptions);
+
+app.get("/api-docs.json", (_req: Request, res: Response) => {
+  return res.json(spec);
+});
+
+app.get("/api-docs", apiReference({
+  content: spec,
+  layout: "classic",
+  hideSearch: true,
+  agent: { disabled: true },
+  mcp: { disabled: true },
+  authentication: {
+    preferredSecurityScheme: "bearerAuth",
+  },
+}));
+
 // match every route
-app.all("/{*path}", async (_req: Request, res: Response) => {
+app.all("/{*path}", verifyAPIKeys, async (_req: Request, res: Response) => {
   // originalUrl = /api/users?page=2, where full path =  http://localhost:3000/api/users?page=2
   const targetUrl: string = `${config.targetApiUrl}${_req.originalUrl}`;
 
@@ -91,9 +130,5 @@ app.all("/{*path}", async (_req: Request, res: Response) => {
   // send body to client
   res.send(Buffer.from(resBody));
 });
-
-// app.get("/health", (_req, res) => {
-//   res.json({ status: "ok" });
-// });
 
 export { app };

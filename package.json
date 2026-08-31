@@ -15,13 +15,16 @@
     "test": "jest"
   },
   "dependencies": {
+    "@scalar/express-api-reference": "^0.10.17",
     "express": "^5.2.1",
-    "redis": "^6.1.0"
+    "redis": "^6.1.0",
+    "swagger-jsdoc": "^6.3.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.2",
     "@types/jest": "^29.5.14",
     "@types/node": "^24.0.3",
+    "@types/swagger-jsdoc": "^6.0.4",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.12",
     "tsx": "^4.20.0",

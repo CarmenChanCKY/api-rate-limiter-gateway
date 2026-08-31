@@ -35,16 +35,14 @@ For the initial setup, only prepare the project foundation:
 
 ## Important Constraints
 
-Do NOT implement the following yet:
+The following features are intentionally deferred until their respective milestones:
 
 - Token Bucket
 - Rate limiting
 - Redis Lua scripts
-- Reverse Proxy logic
-- Authentication logic
+- Authentication
 - Concurrency handling
 - k6 benchmarks
-- AI / LLM features
 
 These will be implemented manually later.
 
@@ -61,8 +59,7 @@ Keep the initial project setup simple and easy to understand.
 
 ## Node Version Sync
 
-Local and Docker must use the same Node version. These three files
-must be updated together when changing the version:
+Local and Docker must use the same Node version. These three files must be updated together when changing the version:
 
 1. `.nvmrc` — source of truth for local dev
 2. `package.json` `engines.node` — documentation only (not enforced)
@@ -91,4 +88,122 @@ The structure can be adjusted if there is a good reason, but avoid over-engineer
 
 The developer will implement the core technical logic manually.
 
-AI should only assist with project setup, configuration, boilerplate, and troubleshooting during the initial setup stage.
+AI may assist with:
+- Project setup and configuration
+- Boilerplate
+- Troubleshooting
+- Code and architecture review
+- Explaining technical concepts
+- Identifying potential bugs or edge cases
+
+AI should not implement the core technical logic on behalf of the developer.
+
+## Current Progress
+
+### Milestone 1 — Basic Reverse Proxy
+
+Status: Completed
+
+The Gateway can receive an incoming HTTP request and forward it to the
+Target API.
+
+Current request flow:
+```
+Client
+  ↓
+Gateway (:3000)
+  ↓
+Target API (:4000)
+  ↓
+Gateway
+  ↓
+Client
+```
+
+The Target API currently provides the following test endpoints:
+
+- `GET /` — Returns a basic service status message
+- `GET /api/users` — Returns a sample user object
+- `GET /api/users/:id` — Returns the requested user ID
+- `POST /api/users` — Returns the request body
+
+The Gateway currently forwards requests without authentication or rate limiting.
+
+## Milestone 2 — API Key Authentication
+
+1. **Use API Key for authentication**
+
+   * Use the `Authorization` header to send the API key.
+   * Format:
+
+   ```http
+   Authorization: Bearer <api-key>
+   ```
+
+2. **Generate API key at startup**
+
+   * Generate a cryptographically secure random API key using Node.js `crypto`.
+   * Store it in runtime memory only.
+   * The key is ephemeral and changes whenever the Gateway restarts.
+
+3. **Add `/get-api` endpoint**
+
+   * Return the currently generated API key.
+   * Handled directly by the Gateway.
+   * Not forwarded to the Target API.
+   * Does not require authentication.
+
+4. **Add Scalar API documentation**
+
+   * Document the Target API endpoints.
+   * Allow users to test requests directly through Scalar UI.
+   * Configure Scalar to use:
+
+   ```http
+   Authorization: Bearer <api-key>
+   ```
+
+5. **Authenticate all proxied requests**
+
+   * Every request that is forwarded to the Target API must contain:
+
+   ```http
+   Authorization: Bearer <api-key>
+   ```
+
+   * Missing or invalid API key → **401 Unauthorized**
+   * Valid API key → continue to reverse proxy.
+
+```text
+Client
+  │
+  ├── GET /get-api ──────→ Gateway → API Key
+  │
+  ├── GET /api-docs ─────→ Scalar UI
+  │
+  └── Other requests
+          ↓
+   Authorization: Bearer <key>
+          ↓
+    API Key Middleware
+       │        │
+    Invalid   Valid
+       ↓        ↓
+      401    Reverse Proxy
+                 ↓
+          Target API :4000
+```
+
+### Implemented
+
+- Gateway HTTP server
+- Target API stub service
+- Basic reverse proxy forwarding
+- Request/response forwarding between Gateway and Target API
+- Docker Compose networking between services
+- Basic test endpoint
+- API Key authentication
+- Generate API Key at startup
+- Authenticate all proxied requests
+- Scalar API Documentation
+- Add `/get-api` endpoint

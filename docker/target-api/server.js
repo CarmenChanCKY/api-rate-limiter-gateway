@@ -9,10 +9,30 @@ const app = express();
 // parse the request body with Content-Type: application/json
 app.use(express.json());
 
+/**
+ * @swagger
+ * /:
+ *   get:
+ *     tags: [Health]
+ *     summary: Check service status
+ *     responses:
+ *       200:
+ *         description: Service is running
+ */
 app.get("/", (_req, res) => {
   res.json({ message: "Target API is running" });
 });
 
+/**
+ * @swagger
+ * /api/users:
+ *   get:
+ *     tags: [Users]
+ *     summary: Get a sample user
+ *     responses:
+ *       200:
+ *         description: A sample user object
+ */
 app.get("/api/users", (_req, res) => {
   res.json({
     userId: 1,
@@ -22,10 +42,43 @@ app.get("/api/users", (_req, res) => {
   });
 });
 
+/**
+ * @swagger
+ * /api/users/{id}:
+ *   get:
+ *     tags: [Users]
+ *     summary: Get user by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The user ID
+ *     responses:
+ *       200:
+ *         description: User found
+ */
 app.get("/api/users/:id", (_req, res) => {
   res.json({ message: _req.params.id });
 });
 
+/**
+ * @swagger
+ * /api/users:
+ *   post:
+ *     tags: [Users]
+ *     summary: Create a user
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: User created
+ */
 app.post("/api/users", (_req, res) => {
   res.json({ message: _req.body });
 });

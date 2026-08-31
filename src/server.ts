@@ -1,9 +1,13 @@
 import { app } from "./app.js";
 import { config } from "./config/env.js";
 import { connectRedis, disconnectRedis } from "./config/redis.js";
+import { getAPIKey } from "./helper/api-key.js";
 
 async function main(): Promise<void> {
   await connectRedis();
+
+  // generate api key
+  getAPIKey();
 
   const server = app.listen(config.port, () => {
     console.log(`Gateway listening on http://localhost:${config.port}`);

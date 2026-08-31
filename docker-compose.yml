@@ -2,11 +2,13 @@ services:
   gateway:
     build: .
     ports:
-      - "${PORT}:${PORT}"
+      - "${PORT}:3000"
     environment:
       - PORT=${PORT}
       - REDIS_URL=${REDIS_URL}
       - TARGET_API_URL=${TARGET_API_URL}
+    volumes:
+      - ./docker/target-api:/app/docker/target-api:ro
     depends_on:
       - redis
       - target-api
@@ -14,9 +16,9 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "${REDIS_PORT}:${REDIS_PORT}"
+      - "${REDIS_PORT}:6379"
 
   target-api:
     build: docker/target-api
     ports:
-      - "${TARGET_API_PORT}:${TARGET_API_PORT}"
+      - "${TARGET_API_PORT}:4000"
