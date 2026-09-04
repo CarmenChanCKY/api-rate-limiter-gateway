@@ -5,6 +5,7 @@ import { config } from "./config/env.js";
 import { swaggerOptions } from "./config/swagger.js";
 import { getAPIKey } from "./helper/api-key.js";
 import verifyAPIKeys from "./middleware/verify-api-key.js";
+import rateLimiter from "./middleware/rate-limiter.js";
 
 const app = express();
 
@@ -24,7 +25,7 @@ const filterHeaders = (
     "transfer-encoding",
     "upgrade",
 
-    "authorization"
+    "authorization",
   ];
 
   const headers: Record<string, string> = {};
@@ -93,42 +94,50 @@ app.get("/api-docs.json", (_req: Request, res: Response) => {
   return res.json(spec);
 });
 
-app.get("/api-docs", apiReference({
-  content: spec,
-  layout: "classic",
-  hideSearch: true,
-  agent: { disabled: true },
-  mcp: { disabled: true },
-  authentication: {
-    preferredSecurityScheme: "bearerAuth",
-  },
-}));
+app.get(
+  "/api-docs",
+  apiReference({
+    content: spec,
+    layout: "classic",
+    hideSearch: true,
+    agent: { disabled: true },
+    mcp: { disabled: true },
+    authentication: {
+      preferredSecurityScheme: "bearerAuth",
+    },
+  }),
+);
 
 // match every route
-app.all("/{*path}", verifyAPIKeys, async (_req: Request, res: Response) => {
-  // originalUrl = /api/users?page=2, where full path =  http://localhost:3000/api/users?page=2
-  const targetUrl: string = `${config.targetApiUrl}${_req.originalUrl}`;
+app.all(
+  "/{*path}",
+  verifyAPIKeys,
+  rateLimiter,
+  async (_req: Request, res: Response) => {
+    // originalUrl = /api/users?page=2, where full path =  http://localhost:3000/api/users?page=2
+    const targetUrl: string = `${config.targetApiUrl}${_req.originalUrl}`;
 
-  // 1. Buffer the incoming body (if any)
-  const body = await bufferBody(_req);
+    // 1. Buffer the incoming body (if any)
+    const body = await bufferBody(_req);
 
-  const response = await fetch(targetUrl, {
-    method: _req.method,
-    headers: filterHeaders(Object.entries(_req.headers)),
-    body: body,
-  });
+    const response = await fetch(targetUrl, {
+      method: _req.method,
+      headers: filterHeaders(Object.entries(_req.headers)),
+      body: body,
+    });
 
-  // read the response body as raw bytes
-  const resBody = await response.arrayBuffer();
+    // read the response body as raw bytes
+    const resBody = await response.arrayBuffer();
 
-  // set status code
-  res.status(response.status);
+    // set status code
+    res.status(response.status);
 
-  // set respose header
-  res.set(filterHeaders(response.headers));
+    // set respose header
+    res.set(filterHeaders(response.headers));
 
-  // send body to client
-  res.send(Buffer.from(resBody));
-});
+    // send body to client
+    res.send(Buffer.from(resBody));
+  },
+);
 
 export { app };

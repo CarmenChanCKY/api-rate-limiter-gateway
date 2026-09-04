@@ -129,7 +129,9 @@ The Target API currently provides the following test endpoints:
 
 The Gateway currently forwards requests without authentication or rate limiting.
 
-## Milestone 2 — API Key Authentication
+### Milestone 2 — API Key Authentication
+
+Status: Completed
 
 1. **Use API Key for authentication**
 
@@ -193,6 +195,155 @@ Client
                  ↓
           Target API :4000
 ```
+
+### Milestone 3 — Token Bucket Rate Limiter
+
+Status: In Progress
+
+Implement a Token Bucket rate limiter using an in-memory Map.
+
+Redis will not be used for the rate limiter state yet. Redis integration will be handled in Milestone 4.
+
+1. **Rate Limit Configuration**
+
+   The following values are shared by all buckets:
+   - Bucket capacity — maximum number of tokens a bucket can hold.
+   - Refill rate — number of tokens replenished per second.
+   - TTL — how long an inactive bucket should remain in memory before being removed.
+
+   Example configuration:
+   ```
+   capacity = 10 tokens
+   refillRate = 1 token / second
+   ttl = 15 minutes
+   ```
+   The exact values may be adjusted during implementation and testing.
+
+2. **Bucket State**
+   Each API key has its own bucket state.
+   M3 stores bucket states in an in-memory Map.
+
+   Conceptually:
+   `Map<APIKey, BucketState>`
+
+   Each bucket state contains:
+   - tokens
+   - lastRefillTime
+
+   Example:
+   ```
+   API Key A → {
+   tokens: 7,
+   lastRefillTime: T1
+   }
+
+   API Key B → {
+   tokens: 3,
+   lastRefillTime: T2
+   }
+   ```
+
+3. **Token Bucket Logic**
+
+   Each request consumes 1 token.
+
+   When a request arrives:
+
+   1. Find the bucket state for the API key.
+   2. If the bucket does not exist, create a new bucket with:
+      - tokens = capacity
+      - lastRefillTime = current time
+   3. Calculate the elapsed time since the last refill.
+   4. Calculate the number of tokens to refill based on the elapsed time and refill rate.
+   5. Do not allow the token count to exceed the bucket capacity.
+   6. If at least 1 token is available:
+      - Consume 1 token.
+      - Allow the request to continue to the reverse proxy.
+   7. If fewer than 1 token is available:
+      - Reject the request with 429 Too Many Requests.
+   8. Update the bucket state.
+
+   Conceptually:
+   ```
+   Request
+      ↓
+   Find bucket state
+      ↓
+   Bucket exists?
+   ┌─┴───────────┐
+   No             Yes
+   ↓              ↓
+   Create       Load state
+   bucket          ↓
+   └───────→ Calculate refill
+                     ↓
+               tokens >= 1?
+               /       \
+               Yes        No
+               ↓          ↓
+         Consume 1       429
+               ↓
+         Update state
+               ↓
+         Reverse Proxy
+   ```
+4. **Lazy Refill**
+
+   Tokens do not need to be actively refilled every second.
+
+   Refill is calculated when a request arrives:
+
+   ```
+   elapsedTime = currentTime - lastRefillTime
+   refillAmount = elapsedTime × refillRate
+   ```
+
+   The resulting token count is capped at the bucket capacity.
+
+5. **In-Memory State**
+
+   M3 uses an in-memory data structure such as:
+   ```
+   Map<APIKey, BucketState>
+   ```
+   This is intentionally temporary.
+
+   The Token Bucket algorithm should be separated from the state storage so that the in-memory implementation can later be replaced by Redis in Milestone 4 without changing the overall rate-limiting flow.
+
+   Conceptually:
+   ```
+   Rate Limiter
+      ↓
+   Token Bucket Algorithm
+      ↓
+   State Storage
+      ├── In-memory Map  ← M3
+      └── Redis          ← M4
+   ```
+
+6. **Request Flow**
+
+   After API Key Authentication:
+   ```
+   Client
+      ↓
+   API Key Authentication
+      ↓
+   Token Bucket Rate Limiter
+      │
+      ├── Token available → Reverse Proxy
+      │
+      └── No token → 429 Too Many Requests
+   ```
+7. **Scope**
+   M3 focuses only on:
+   - Token Bucket algorithm
+   - In-memory bucket state
+   - Per-API-key rate limiting
+   - Token refill calculation
+   - Bucket capacity
+
+   Redis storage, concurrent requests/race conditions, and atomic operations are intentionally deferred to Milestones 4 and 5.
 
 ### Implemented
 
