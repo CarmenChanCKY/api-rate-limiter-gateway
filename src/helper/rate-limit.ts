@@ -1,9 +1,9 @@
-let maxCapacity: number = 20;
-let refillRate: number = 1; // how many tokens will be refilled every second
-let ttl: number = 900000; // 15 mintues
+const maxCapacity: number = 20;
+const refillRate: number = 1; // how many tokens will be refilled every second
+const ttl: number = 900000; // 15 mintues
 
 let bucketList: Map<
-  String,
+  string,
   {
     tokens: number;
     lastRefillTime: number;
@@ -16,7 +16,12 @@ const getBucket = (
   tokens: number;
   lastRefillTime: number;
 } => {
-  return bucketList.get(apiKey) || { tokens: maxCapacity, lastRefillTime: 0 };
+  return (
+    bucketList.get(apiKey) || {
+      tokens: maxCapacity,
+      lastRefillTime: Date.now(),
+    }
+  );
 };
 
 const setBucket = (apiKey: string, tokens: number, lastRefillTime: number) => {
@@ -37,16 +42,18 @@ const updateTokenAmount = (apiKey: string): boolean => {
   // update last refill time
   lastRefillTime = currentTime;
 
+  let success = false;
+
+  if (tokens >= 1) {
+    // minus one token for current request
+    tokens--;
+    success = true;
+  }
+
   // update bucket list
   setBucket(apiKey, tokens, lastRefillTime);
 
-  // minus one token for current request
-  tokens--;
-  if (tokens < 0) {
-    return false;
-  }
-
-  return true;
+  return success;
 };
 
 export default updateTokenAmount;

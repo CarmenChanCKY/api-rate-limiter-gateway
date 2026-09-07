@@ -12,7 +12,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest"
   },
   "dependencies": {
     "@scalar/express-api-reference": "^0.10.17",
@@ -27,6 +27,7 @@
     "@types/swagger-jsdoc": "^6.0.4",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.12",
+    "ts-node": "^10.9.2",
     "tsx": "^4.20.0",
     "typescript": "~5.9.3"
   }

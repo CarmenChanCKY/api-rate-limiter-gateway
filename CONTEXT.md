@@ -198,7 +198,7 @@ Client
 
 ### Milestone 3 — Token Bucket Rate Limiter
 
-Status: In Progress
+Status: Completed
 
 Implement a Token Bucket rate limiter using an in-memory Map.
 
@@ -358,3 +358,5 @@ Redis will not be used for the rate limiter state yet. Redis integration will be
 - Authenticate all proxied requests
 - Scalar API Documentation
 - Add `/get-api` endpoint
+- Rate Limit Configuration
+- Token Bucket Logic
