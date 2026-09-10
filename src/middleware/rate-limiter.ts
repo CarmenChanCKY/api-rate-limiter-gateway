@@ -1,10 +1,14 @@
 import { type Request, type Response, type NextFunction } from "express";
 import updateTokenAmount from "../helper/rate-limit.js";
 
-const rateLimiter = (_req: Request, res: Response, next: NextFunction) => {
+const rateLimiter = async (
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   let receiveAPIKey: string = _req.header("authorization") || "";
 
-  const limitResult = updateTokenAmount(receiveAPIKey);
+  const limitResult = await updateTokenAmount(receiveAPIKey);
 
   if (limitResult) {
     return next();

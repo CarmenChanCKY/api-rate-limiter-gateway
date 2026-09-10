@@ -104,8 +104,7 @@ AI should not implement the core technical logic on behalf of the developer.
 
 Status: Completed
 
-The Gateway can receive an incoming HTTP request and forward it to the
-Target API.
+The Gateway can receive an incoming HTTP request and forward it to the Target API.
 
 Current request flow:
 ```
@@ -202,20 +201,19 @@ Status: Completed
 
 Implement a Token Bucket rate limiter using an in-memory Map.
 
-Redis will not be used for the rate limiter state yet. Redis integration will be handled in Milestone 4.
+Redis is not used for rate limiter state in M3. Redis storage is introduced in M4.
 
 1. **Rate Limit Configuration**
 
    The following values are shared by all buckets:
    - Bucket capacity — maximum number of tokens a bucket can hold.
    - Refill rate — number of tokens replenished per second.
-   - TTL — how long an inactive bucket should remain in memory before being removed.
+   - TTL — reserved for Redis bucket lifecycle management in M4.
 
    Example configuration:
    ```
-   capacity = 10 tokens
+   capacity = 20 tokens
    refillRate = 1 token / second
-   ttl = 15 minutes
    ```
    The exact values may be adjusted during implementation and testing.
 
@@ -233,13 +231,13 @@ Redis will not be used for the rate limiter state yet. Redis integration will be
    Example:
    ```
    API Key A → {
-   tokens: 7,
-   lastRefillTime: T1
+     tokens: 7,
+     lastRefillTime: T1
    }
 
    API Key B → {
-   tokens: 3,
-   lastRefillTime: T2
+     tokens: 3,
+     lastRefillTime: T2
    }
    ```
 
@@ -262,6 +260,9 @@ Redis will not be used for the rate limiter state yet. Redis integration will be
    7. If fewer than 1 token is available:
       - Reject the request with 429 Too Many Requests.
    8. Update the bucket state.
+   Both accepted and rejected requests update `lastRefillTime`.
+
+   This means a rejected request resets the refill time to the time at which that request was processed.
 
    Conceptually:
    ```
@@ -276,6 +277,8 @@ Redis will not be used for the rate limiter state yet. Redis integration will be
    Create       Load state
    bucket          ↓
    └───────→ Calculate refill
+                     ↓
+               Update lastRefillTime
                      ↓
                tokens >= 1?
                /       \
@@ -300,6 +303,23 @@ Redis will not be used for the rate limiter state yet. Redis integration will be
 
    The resulting token count is capped at the bucket capacity.
 
+   Fractional tokens are preserved.
+
+   For example, with:
+
+   ```
+   refillRate = 1 token / second
+   elapsedTime = 0.5 seconds
+   ```
+
+   the bucket can receive:
+
+   ```
+   0.5 tokens
+   ```
+
+   Fractional refill amounts are not rounded down.
+
 5. **In-Memory State**
 
    M3 uses an in-memory data structure such as:
@@ -308,7 +328,7 @@ Redis will not be used for the rate limiter state yet. Redis integration will be
    ```
    This is intentionally temporary.
 
-   The Token Bucket algorithm should be separated from the state storage so that the in-memory implementation can later be replaced by Redis in Milestone 4 without changing the overall rate-limiting flow.
+   The Token Bucket algorithm is separated from the state storage so that the in-memory implementation can later be replaced by Redis in M4 without changing the overall rate-limiting flow.
 
    Conceptually:
    ```
@@ -342,10 +362,131 @@ Redis will not be used for the rate limiter state yet. Redis integration will be
    - Per-API-key rate limiting
    - Token refill calculation
    - Bucket capacity
+   - Fractional tokens
 
-   Redis storage, concurrent requests/race conditions, and atomic operations are intentionally deferred to Milestones 4 and 5.
+   Redis storage, TTL, Lua atomic operations, and concurrency testing are handled in later milestones.
 
-### Implemented
+### Milestone 4 — Redis-backed Atomic Token Bucket
+
+Status: In Progress
+
+Replace the in-memory bucket state with Redis and make the bucket update atomic using a Redis Lua script.
+
+1. **Redis Storage**
+
+   Each API key has its own Redis key.
+
+   Suggested structure:
+
+   ```
+   rate-limit:<api-key>
+   ```
+
+   Redis data type:
+
+   ```
+   Hash
+   ```
+
+   Fields:
+
+   ```
+   tokens
+   lastRefillTime
+   ```
+
+   Example:
+
+   ```
+   rate-limit:abc123
+   ├── tokens = 13.5
+   └── lastRefillTime = 1757419200123
+   ```
+
+2. **Redis-backed State**
+
+   The M3 bucket state:
+
+   ```ts
+   {
+     tokens: number;
+     lastRefillTime: number;
+   }
+   ```
+
+   is stored as Redis Hash fields.
+
+   The Token Bucket calculation remains conceptually the same as M3.
+
+3. **Asynchronous Redis Operations**
+
+   Since Redis operations through `node-redis` are asynchronous, the rate-limit update function will become asynchronous.
+
+   Conceptually:
+
+   ```ts
+   updateTokenAmount(apiKey): Promise<boolean>
+   ```
+
+4. **Lua Atomic Operation**
+
+   The complete bucket update should be performed inside a Redis Lua script.
+
+   Conceptually:
+
+   ```text
+   Request
+      ↓
+   Rate Limiter
+      ↓
+   Redis Lua Script
+      ├── Read bucket state
+      ├── Calculate refill
+      ├── Update lastRefillTime
+      ├── Check token availability
+      ├── Consume token if available
+      ├── Save bucket state
+      └── Set / refresh TTL
+      ↓
+   Return result
+   ```
+
+   Lua is used to make the sequence of Redis operations atomic.
+
+   It is not treated as a traditional application-level lock.
+
+   Other Redis commands cannot be interleaved into the middle of the Lua script while Redis is executing that script.
+
+5. **TTL**
+
+   Bucket state should expire after a period of inactivity.
+
+   Current intended TTL:
+
+   ```text
+   15 minutes
+   ```
+
+   The TTL is applied to the Redis bucket key.
+
+   Activity on the bucket refreshes its TTL.
+
+   If the API key has no requests for the TTL period, Redis can automatically remove the bucket state.
+
+6. **M4 Scope**
+
+   M4 focuses on:
+
+   * Redis bucket storage
+   * Redis Hash
+   * Async Redis operations
+   * Redis Lua script
+   * Atomic bucket update
+   * TTL / key expiration
+
+   Concurrency testing is deferred to M5.
+
+## Implemented
 
 - Gateway HTTP server
 - Target API stub service
@@ -360,3 +501,9 @@ Redis will not be used for the rate limiter state yet. Redis integration will be
 - Add `/get-api` endpoint
 - Rate Limit Configuration
 - Token Bucket Logic
+- In-memory per-API-key bucket state
+- Lazy token refill
+- Fractional token support
+- 429 response when no token is available
+- Token Bucket tests
+- Rate Limiter middleware tests

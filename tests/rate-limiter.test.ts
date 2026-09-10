@@ -5,20 +5,38 @@ import {
   jest,
   beforeEach,
   afterEach,
+  beforeAll,
+  afterAll,
 } from "@jest/globals";
 import { type Request, type Response, type NextFunction } from "express";
+import { connectRedis, disconnectRedis } from "../src/config/redis.js";
+import { config } from "../src/config/env.js";
 
 const expectedCapacity = 20;
 
 describe("Token Bucket", () => {
+  beforeAll(async () => {
+    // connect to redis /1 namespace
+    await connectRedis(`${config.redisUrl}/1`);
+  });
+
   beforeEach(() => {
-    jest.useFakeTimers();
+    jest.useFakeTimers({
+      doNotFake: [
+        "setTimeout",
+        "setInterval",
+        "setImmediate",
+        "clearTimeout",
+        "clearInterval",
+        "clearImmediate",
+      ],
+    });
   });
 
   test("allows the first request for a new API key", async () => {
     const updateTokenAmount = (await import("../src/helper/rate-limit.js"))
       .default;
-    expect(updateTokenAmount("mocked-key-001")).toBe(true);
+    expect(await updateTokenAmount("mocked-key-001")).toBe(true);
   });
 
   test("allows requests up to bucket capacity", async () => {
@@ -30,7 +48,7 @@ describe("Token Bucket", () => {
     let final = true;
     const maxCapacity = expectedCapacity + 1;
     for (count = 1; count <= maxCapacity; count++) {
-      final = updateTokenAmount(key);
+      final = await updateTokenAmount(key);
       if (!final) {
         break;
       }
@@ -47,11 +65,11 @@ describe("Token Bucket", () => {
 
     // use all the token inside the bucket
     for (let count = 1; count <= expectedCapacity; count++) {
-      updateTokenAmount(key);
+      await updateTokenAmount(key);
     }
 
     // use one more token
-    const updateState = updateTokenAmount(key);
+    const updateState = await updateTokenAmount(key);
     expect(updateState).toBe(false);
   });
 
@@ -62,24 +80,24 @@ describe("Token Bucket", () => {
 
     // use all the token
     for (let count = 1; count <= expectedCapacity; count++) {
-      updateTokenAmount(key);
+      await updateTokenAmount(key);
     }
 
     // 3 seconds passed
     jest.advanceTimersByTime(3000);
 
     // use the refilled token again
-    let refillSuccess = updateTokenAmount(key);
+    let refillSuccess = await updateTokenAmount(key);
     expect(refillSuccess).toBe(true);
 
-    refillSuccess = updateTokenAmount(key);
+    refillSuccess = await updateTokenAmount(key);
     expect(refillSuccess).toBe(true);
 
-    refillSuccess = updateTokenAmount(key);
+    refillSuccess = await updateTokenAmount(key);
     expect(refillSuccess).toBe(true);
 
     // refill amount should be empty
-    refillSuccess = updateTokenAmount(key);
+    refillSuccess = await updateTokenAmount(key);
     expect(refillSuccess).toBe(false);
   });
 
@@ -90,7 +108,7 @@ describe("Token Bucket", () => {
 
     // use all the token
     for (let count = 1; count <= expectedCapacity; count++) {
-      updateTokenAmount(key);
+      await updateTokenAmount(key);
     }
 
     // expectedCapacity + 5 seconds passed
@@ -98,12 +116,12 @@ describe("Token Bucket", () => {
 
     // use all the token again
     for (let count = 1; count <= expectedCapacity; count++) {
-      updateTokenAmount(key);
+      await updateTokenAmount(key);
     }
 
     // use one more token
     // it should return false if the maximum token refilled equals expectedCapacity
-    expect(updateTokenAmount(key)).toBe(false);
+    expect(await updateTokenAmount(key)).toBe(false);
   });
 
   test("preserves fractional tokens", async () => {
@@ -113,23 +131,23 @@ describe("Token Bucket", () => {
 
     // use all the token
     for (let count = 1; count <= expectedCapacity; count++) {
-      updateTokenAmount(key);
+      await updateTokenAmount(key);
     }
 
     // 0.5 seconds passed. It should refill 0.5 token
     jest.advanceTimersByTime(500);
 
     // try to use 1 token, it should return false
-    expect(updateTokenAmount(key)).toBe(false);
+    expect(await updateTokenAmount(key)).toBe(false);
 
     // 0.5 seconds passed. Currently there should be 1 token in the bucket.
     jest.advanceTimersByTime(500);
 
     // use one token, it should return true
-    expect(updateTokenAmount(key)).toBe(true);
+    expect(await updateTokenAmount(key)).toBe(true);
 
     // use one token again. It should return false
-    expect(updateTokenAmount(key)).toBe(false);
+    expect(await updateTokenAmount(key)).toBe(false);
   });
 
   test("keeps buckets independent between API keys", async () => {
@@ -141,18 +159,22 @@ describe("Token Bucket", () => {
 
     // use all the token for key1
     for (let count = 1; count <= expectedCapacity; count++) {
-      updateTokenAmount(key1);
+      await updateTokenAmount(key1);
     }
 
     // use one more token for key1
-    expect(updateTokenAmount(key1)).toBe(false);
+    expect(await updateTokenAmount(key1)).toBe(false);
 
     // use a token for key2
-    expect(updateTokenAmount(key2)).toBe(true);
+    expect(await updateTokenAmount(key2)).toBe(true);
   });
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  afterAll(async () => {
+    await disconnectRedis();
   });
 });
 
@@ -188,7 +210,7 @@ describe("Rate Limiter Middleware", () => {
     const rateLimiter = (await import("../src/middleware/rate-limiter.js"))
       .default;
 
-    rateLimiter(request as Request, response as Response, next);
+    await rateLimiter(request as Request, response as Response, next);
 
     expect(next).toHaveBeenCalledTimes(1);
   });
@@ -216,7 +238,7 @@ describe("Rate Limiter Middleware", () => {
     const rateLimiter = (await import("../src/middleware/rate-limiter.js"))
       .default;
 
-    rateLimiter(request as Request, response as Response, next);
+    await rateLimiter(request as Request, response as Response, next);
 
     expect(response.status).toHaveBeenCalledWith(429);
     expect(response.json).toHaveBeenCalled();
@@ -245,7 +267,7 @@ describe("Rate Limiter Middleware", () => {
     const rateLimiter = (await import("../src/middleware/rate-limiter.js"))
       .default;
 
-    rateLimiter(request as Request, response as Response, next);
+    await rateLimiter(request as Request, response as Response, next);
 
     expect(next).not.toHaveBeenCalled();
   });
