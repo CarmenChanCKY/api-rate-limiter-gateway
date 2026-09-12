@@ -11,7 +11,7 @@ The project is a portfolio backend project built to practice Node.js, TypeScript
 - Node.js 24.19.0 (Active LTS)
 - TypeScript ~5.9.x
 - Express.js 5.2.x
-- Redis (node-redis v6.x)
+- Redis (node-redis v8.2)
 - Docker / Docker Compose
 - k6 (later)
 - Jest 30.x + ts-jest ~29.4.x
@@ -29,7 +29,7 @@ For the initial setup, only prepare the project foundation:
 - Configure Express.js.
 - Set up a basic application entry point.
 - Add basic environment variable configuration.
-- Have Redis client (`redis` v6) configured and connected in Gateway, but unused by any route logic yet.
+- Have Redis client (`redis` v8.2) configured and connected in Gateway, but unused by any route logic yet.
 - Make sure all services can start successfully with Docker Compose.
 - Add a basic `/health` endpoint (returns `{status: "ok"}`).
 
@@ -66,7 +66,7 @@ Local and Docker must use the same Node version. These three files must be updat
 3. `Dockerfile` `FROM` line — pinned to the exact same version
 
 ## Suggested Structure
-
+```
 src/
 ├── app.ts
 ├── server.ts
@@ -74,6 +74,7 @@ src/
 
 docker/
 └── target-api/
+```
 
 Dockerfile
 docker-compose.yml
@@ -368,7 +369,7 @@ Redis is not used for rate limiter state in M3. Redis storage is introduced in M
 
 ### Milestone 4 — Redis-backed Atomic Token Bucket
 
-Status: In Progress
+Status: Completed
 
 Replace the in-memory bucket state with Redis and make the bucket update atomic using a Redis Lua script.
 
@@ -376,10 +377,10 @@ Replace the in-memory bucket state with Redis and make the bucket update atomic 
 
    Each API key has its own Redis key.
 
-   Suggested structure:
+   Redis key format:
 
    ```
-   rate-limit:<api-key>
+   rate_limiter:<api-key>
    ```
 
    Redis data type:
@@ -398,7 +399,7 @@ Replace the in-memory bucket state with Redis and make the bucket update atomic 
    Example:
 
    ```
-   rate-limit:abc123
+   rate_limiter:abc123
    ├── tokens = 13.5
    └── lastRefillTime = 1757419200123
    ```
@@ -420,7 +421,7 @@ Replace the in-memory bucket state with Redis and make the bucket update atomic 
 
 3. **Asynchronous Redis Operations**
 
-   Since Redis operations through `node-redis` are asynchronous, the rate-limit update function will become asynchronous.
+   Since Redis operations through `node-redis` are asynchronous, the rate-limit update function is asynchronous.
 
    Conceptually:
 
@@ -430,17 +431,18 @@ Replace the in-memory bucket state with Redis and make the bucket update atomic 
 
 4. **Lua Atomic Operation**
 
-   The complete bucket update should be performed inside a Redis Lua script.
+   The complete bucket update is performed inside a Redis Lua script.
 
-   Conceptually:
+   The script:
 
-   ```text
+   ```
    Request
       ↓
    Rate Limiter
       ↓
    Redis Lua Script
       ├── Read bucket state
+      ├── Get current Redis time
       ├── Calculate refill
       ├── Update lastRefillTime
       ├── Check token availability
@@ -457,23 +459,62 @@ Replace the in-memory bucket state with Redis and make the bucket update atomic 
 
    Other Redis commands cannot be interleaved into the middle of the Lua script while Redis is executing that script.
 
-5. **TTL**
+5. **Time Source**
 
-   Bucket state should expire after a period of inactivity.
+   The Lua script uses Redis `TIME` as the authoritative time source.
 
-   Current intended TTL:
+   Redis time is converted to milliseconds before calculating token refill, matching the millisecond-based `lastRefillTime` representation.
 
-   ```text
-   15 minutes
+   This keeps the token bucket time calculation inside Redis rather than relying on the application server's local clock.
+
+6. **TTL**
+
+   Bucket state expires after a period of inactivity.
+
+   Current TTL:
+
+   ```
+   900 seconds (15 minutes)
    ```
 
    The TTL is applied to the Redis bucket key.
 
-   Activity on the bucket refreshes its TTL.
+   Each request that reaches the rate limiter refreshes the bucket TTL to 900 seconds, regardless of whether the request is accepted or rejected.
 
-   If the API key has no requests for the TTL period, Redis can automatically remove the bucket state.
+   If the API key has no requests for 15 minutes, Redis automatically removes the bucket state.
 
-6. **M4 Scope**
+7. **Bucket Recreation**
+
+   If a bucket key has expired, the next request recreates the bucket with:
+
+   ```
+   tokens = capacity
+   lastRefillTime = current Redis time
+   TTL = 900 seconds
+   ```
+
+8. **M4 Testing**
+
+   M4 Redis bucket behavior is tested using a real Redis instance and the actual Lua script.
+
+   Tests cover:
+
+   * Token consumption through Redis
+   * Token refill
+   * Capacity limit
+   * Fractional tokens
+   * Per-API-key bucket isolation
+   * Bucket TTL
+   * TTL refresh on subsequent requests
+   * Bucket recreation after expiration
+
+   Middleware tests continue to mock `updateTokenAmount()` so middleware behavior is tested separately.
+
+   Jest fake timers are not used to control token refill time inside the Lua script because the script uses Redis `TIME` rather than the Node.js/Jest clock.
+
+   Tests that require elapsed real time use short real delays where necessary. For tests that only need to establish a historical timestamp, Redis bucket state can be adjusted directly instead of waiting for the full elapsed period.
+
+9. **M4 Scope**
 
    M4 focuses on:
 
@@ -481,8 +522,10 @@ Replace the in-memory bucket state with Redis and make the bucket update atomic 
    * Redis Hash
    * Async Redis operations
    * Redis Lua script
+   * Redis `TIME`
    * Atomic bucket update
    * TTL / key expiration
+   * Bucket recreation after expiration
 
    Concurrency testing is deferred to M5.
 
@@ -507,3 +550,10 @@ Replace the in-memory bucket state with Redis and make the bucket update atomic 
 - 429 response when no token is available
 - Token Bucket tests
 - Rate Limiter middleware tests
+- Redis-backed bucket state
+- Redis Hash bucket storage
+- Redis Lua atomic token bucket update
+- Redis TIME-based refill calculation
+- Redis bucket TTL
+- Bucket expiration and recreation
+- Redis Token Bucket integration tests

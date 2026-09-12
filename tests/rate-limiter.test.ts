@@ -4,42 +4,41 @@ import {
   test,
   jest,
   beforeEach,
-  afterEach,
   beforeAll,
   afterAll,
 } from "@jest/globals";
 import { type Request, type Response, type NextFunction } from "express";
-import { connectRedis, disconnectRedis } from "../src/config/redis.js";
+import {
+  connectRedis,
+  disconnectRedis,
+  type RedisClientWithScripts,
+} from "../src/config/redis.js";
 import { config } from "../src/config/env.js";
+import { getKey } from "../src/helper/rate-limit.js";
+import { setTimeout } from "timers/promises";
 
 const expectedCapacity = 20;
 
 describe("Token Bucket", () => {
+  let client: RedisClientWithScripts;
+
+  const getRedisMilliseconds = async () => {
+    const [seconds, microseconds] = await client.time();
+    return parseInt(seconds) * 1000 + Math.floor(parseInt(microseconds) / 1000);
+  };
+
   beforeAll(async () => {
     // connect to redis /1 namespace
-    await connectRedis(`${config.redisUrl}/1`);
+    client = await connectRedis(`${config.redisUrl}/1`);
   });
 
-  beforeEach(() => {
-    jest.useFakeTimers({
-      doNotFake: [
-        "setTimeout",
-        "setInterval",
-        "setImmediate",
-        "clearTimeout",
-        "clearInterval",
-        "clearImmediate",
-      ],
-    });
-  });
-
-  test("allows the first request for a new API key", async () => {
+  test.concurrent("allows the first request for a new API key", async () => {
     const updateTokenAmount = (await import("../src/helper/rate-limit.js"))
       .default;
     expect(await updateTokenAmount("mocked-key-001")).toBe(true);
   });
 
-  test("allows requests up to bucket capacity", async () => {
+  test.concurrent("allows requests up to bucket capacity", async () => {
     const key = "mocked-key-002";
     const updateTokenAmount = (await import("../src/helper/rate-limit.js"))
       .default;
@@ -58,7 +57,7 @@ describe("Token Bucket", () => {
     expect(count).toBe(maxCapacity);
   });
 
-  test("rejects when no token is available", async () => {
+  test.concurrent("rejects when no token is available", async () => {
     const key = "mocked-key-003";
     const updateTokenAmount = (await import("../src/helper/rate-limit.js"))
       .default;
@@ -73,7 +72,7 @@ describe("Token Bucket", () => {
     expect(updateState).toBe(false);
   });
 
-  test("refills based on elapsed time", async () => {
+  test.concurrent("refills based on elapsed time", async () => {
     const key = "mocked-key-004";
     const updateTokenAmount = (await import("../src/helper/rate-limit.js"))
       .default;
@@ -83,14 +82,11 @@ describe("Token Bucket", () => {
       await updateTokenAmount(key);
     }
 
-    // 3 seconds passed
-    jest.advanceTimersByTime(3000);
+    // 2 seconds passed
+    await setTimeout(2000);
 
     // use the refilled token again
     let refillSuccess = await updateTokenAmount(key);
-    expect(refillSuccess).toBe(true);
-
-    refillSuccess = await updateTokenAmount(key);
     expect(refillSuccess).toBe(true);
 
     refillSuccess = await updateTokenAmount(key);
@@ -101,7 +97,7 @@ describe("Token Bucket", () => {
     expect(refillSuccess).toBe(false);
   });
 
-  test("does not exceed capacity", async () => {
+  test.concurrent("does not exceed capacity", async () => {
     const key = "mocked-key-005";
     const updateTokenAmount = (await import("../src/helper/rate-limit.js"))
       .default;
@@ -111,8 +107,15 @@ describe("Token Bucket", () => {
       await updateTokenAmount(key);
     }
 
-    // expectedCapacity + 5 seconds passed
-    jest.advanceTimersByTime((expectedCapacity + 5) * 1000);
+    // simulate expectedCapacity + 2 seconds passed
+    const currentTime = await getRedisMilliseconds();
+
+    await client?.hSet(
+      getKey(key),
+      "lastRefillTime",
+      currentTime - (expectedCapacity + 2) * 1000,
+    );
+    // await setTimeout((expectedCapacity + 2) * 1000);
 
     // use all the token again
     for (let count = 1; count <= expectedCapacity; count++) {
@@ -124,7 +127,7 @@ describe("Token Bucket", () => {
     expect(await updateTokenAmount(key)).toBe(false);
   });
 
-  test("preserves fractional tokens", async () => {
+  test.concurrent("preserves fractional tokens", async () => {
     const key = "mocked-key-006";
     const updateTokenAmount = (await import("../src/helper/rate-limit.js"))
       .default;
@@ -135,13 +138,13 @@ describe("Token Bucket", () => {
     }
 
     // 0.5 seconds passed. It should refill 0.5 token
-    jest.advanceTimersByTime(500);
+    await setTimeout(500);
 
     // try to use 1 token, it should return false
     expect(await updateTokenAmount(key)).toBe(false);
 
     // 0.5 seconds passed. Currently there should be 1 token in the bucket.
-    jest.advanceTimersByTime(500);
+    await setTimeout(500);
 
     // use one token, it should return true
     expect(await updateTokenAmount(key)).toBe(true);
@@ -150,7 +153,7 @@ describe("Token Bucket", () => {
     expect(await updateTokenAmount(key)).toBe(false);
   });
 
-  test("keeps buckets independent between API keys", async () => {
+  test.concurrent("keeps buckets independent between API keys", async () => {
     const key1 = "mocked-key-007";
     const key2 = "mocked-key-008";
 
@@ -169,8 +172,76 @@ describe("Token Bucket", () => {
     expect(await updateTokenAmount(key2)).toBe(true);
   });
 
-  afterEach(() => {
-    jest.useRealTimers();
+  test.concurrent("sets a 15-minute expiration", async () => {
+    const key = "mocked-key-009";
+    const updateTokenAmount = (await import("../src/helper/rate-limit.js"))
+      .default;
+
+    await updateTokenAmount(key);
+
+    // get the remaining time to live of a key that has a timeout
+    const ttl = await client.ttl(getKey(key));
+    // expire after 15 minutes i.e. 900 seconds
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(900);
+  });
+
+  test.concurrent("extends expiration on each request", async () => {
+    const key = "mocked-key-010";
+    const updateTokenAmount = (await import("../src/helper/rate-limit.js"))
+      .default;
+
+    // make the first request
+    await updateTokenAmount(key);
+
+    // 2 seconds passed
+    await setTimeout(2000);
+
+    // get the remaining time to live of first request
+    const ttl1 = await client.ttl(getKey(key));
+
+    // make the second request
+    await updateTokenAmount(key);
+
+    // get the remaining time to live of second request
+    const ttl2 = await client.ttl(getKey(key));
+
+    // these remaining time should not be equal and ttl2 should greater than ttl1
+    expect(ttl2).toBeGreaterThan(ttl1);
+  });
+
+  test.concurrent("recreates token data after expiration", async () => {
+    const key = "mocked-key-011";
+    const updateTokenAmount = (await import("../src/helper/rate-limit.js"))
+      .default;
+
+    // create first request
+    await updateTokenAmount(key);
+
+    // set the expiry time to 1 second
+    await client.expire(getKey(key), 1);
+
+    // wait 3 second
+    await setTimeout(3000);
+
+    // get the remaining time to live of first request
+    const ttl1 = await client.ttl(getKey(key));
+
+    // -2 means the key does not exist i.e. expired
+    expect(ttl1).toBe(-2);
+
+    // create second request
+    await updateTokenAmount(key);
+
+    // check token bucket created
+    const data = await client.hGetAll(getKey(key));
+    expect(Object.keys(data).length).toBeGreaterThan(0);
+
+    // get the remaining time to live of second request
+    const ttl2 = await client.ttl(getKey(key));
+    // expire after 15 minutes i.e. 900 seconds
+    expect(ttl2).toBeGreaterThan(0);
+    expect(ttl2).toBeLessThanOrEqual(900);
   });
 
   afterAll(async () => {

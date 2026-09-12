@@ -14,7 +14,7 @@ Gateway (:3000)  -->  Target API (:4000)
 Redis (:6379)
 ```
 
-The Gateway receives incoming HTTP requests and forwards them to the Target API. Redis is integrated for future rate limiting logic. As of Milestone 3, proxied requests require a Bearer API key issued by the Gateway and are rate limited with an in-memory Token Bucket algorithm (per API key).
+The Gateway receives incoming HTTP requests and forwards them to the Target API. Proxied requests require a Bearer API key issued by the Gateway and are rate limited per API key with a Token Bucket algorithm. Bucket state is stored atomically in Redis using a Lua script.
 
 Current request flow:
 
@@ -24,7 +24,7 @@ GET /api-docs → opens Scalar docs (no auth required)
 GET /api-docs.json → returns raw OpenAPI document
 Any proxied route → validate Authorization: Bearer <api-key>
                     missing/invalid → 401 Unauthorized
-                    valid → Token Bucket rate limiter
+                    valid → Token Bucket rate limiter (Redis Lua)
                             token available → forward to Target API
                             no token → 429 Too Many Requests
 ```
@@ -34,7 +34,7 @@ Any proxied route → validate Authorization: Bearer <api-key>
 - Node.js 24.19.0
 - TypeScript ~5.9.x
 - Express.js 5.2.x
-- Redis (node-redis v6.x)
+- Redis (node-redis v6.x) with Lua scripts
 - Docker / Docker Compose
 - Jest 30.x + ts-jest
 
@@ -149,19 +149,21 @@ src/
   server.ts           # Entry point, starts server & Redis
   config/
     env.ts            # Environment variable configuration
-    redis.ts          # Redis client setup
+    redis.ts          # Redis client setup and atomic Token Bucket Lua script
     swagger.ts        # swagger-jsdoc OpenAPI configuration
   helper/
     api-key.ts        # Runtime API key generation and access
-    rate-limit.ts     # Token Bucket algorithm and in-memory bucket state
+    rate-limit.ts     # Token Bucket entry point backed by Redis Lua script
     security.ts       # Cryptographic key generation utilities
   middleware/
     rate-limiter.ts   # Token Bucket rate limiting for proxied requests
     verify-api-key.ts # Bearer token validation for proxied requests
+  types/
+    express.d.ts      # Express type declarations
 
 tests/
   api-key.test.ts     # API key generation tests
-  rate-limiter.test.ts# Token Bucket and rate limiter middleware tests
+  rate-limiter.test.ts# Token Bucket (Redis Lua) and rate limiter middleware tests
 
 docker/
   target-api/
@@ -176,41 +178,67 @@ docker-compose.yml    # Service orchestration
 - All proxied requests pass through `verify-api-key`, which validates the `Authorization: Bearer <api-key>` header.
 - Missing or invalid → `401 Unauthorized`.
 - Valid → the Token Bucket rate limiter decides whether to allow or reject the request.
+- Each rate limit decision calls `updateTokenAmount()`, which runs a Redis Lua script that reads the bucket's Hash (`rate_limiter:<api-key>`), refills tokens based on elapsed Redis time, consumes a token if available, updates `lastRefillTime`, and refreshes the 15-minute TTL in one atomic operation.
 - Token available → reverse proxy buffers the body and forwards the request to the Target API via `fetch`.
 - No token available → `429 Too Many Requests`.
 - Hop-by-hop headers (`connection`, `upgrade`, `authorization`, etc.) are stripped; all others are forwarded as-is.
 - The Target API response is streamed back to the client with the original status code and headers.
 
+## How Rate Limiting Works
+
+Each API key gets its own bucket stored in Redis:
+
+```
+rate_limiter:<api-key>
+
+├── tokens = <capacity remaining>
+└── lastRefillTime = <epoch ms from Redis TIME>
+```
+
+- Bucket capacity is 20 tokens, refilling at 1 token/second.
+- Refill is lazy — it is calculated on each request using `elapsed time × refill rate`, capped at capacity, and fractional tokens are preserved.
+- The whole update runs atomically inside a Lua script using Redis `TIME` as the authoritative clock (no app-level locks needed).
+- Buckets expire after 15 minutes (900 seconds) of inactivity; every request refreshes the TTL. An expired bucket is recreated at full capacity on the next request.
+
 ## Testing
 
-Unit tests are written with **Jest** (using fake timers) and cover the Token Bucket helper, the rate limiter middleware, and API key generation.
+Tests are written with **Jest** and split into two groups:
 
-Run all tests:
+- **Token Bucket — Redis integration tests.** These exercise the real Lua script against a real Redis instance (database index 1) and cover token consumption, lazy refill, capacity limits, fractional tokens, per-API-key isolation, key expiration, and TTL refresh/recreation.
+- **Middleware unit tests.** These mock `updateTokenAmount()` so the middleware behavior (allowing/rejecting/failing closed) is tested in isolation.
+
+A running Redis instance is required for the integration tests. Run all tests with:
 
 ```bash
+docker compose up -d redis
 npm test
 ```
 
 The `tests/` directory:
 
-- `tests/rate-limiter.test.ts` — Token Bucket algorithm and rate limiter middleware
-  - Allows the first request for a new API key
-  - Allows requests up to bucket capacity (20), then rejects
-  - Rejects when no token is available
-  - Refills based on elapsed time
-  - Does not exceed capacity
-  - Preserves fractional tokens (e.g. refilling 0.5 token after 0.5s)
-  - Keeps buckets independent between API keys
-  - Middleware returns `429` and does not forward when no token is available
+- `tests/rate-limiter.test.ts` — Token Bucket Redis integration tests + rate limiter middleware
+  - Token Bucket:
+    - Allows the first request for a new API key
+    - Allows requests up to bucket capacity (20), then rejects
+    - Rejects when no token is available
+    - Refills based on elapsed time (real delays, since refill uses Redis `TIME`)
+    - Does not exceed capacity
+    - Preserves fractional tokens (e.g. 0.5 token after 0.5 second, capped at capacity)
+    - Keeps buckets independent between API keys
+    - Sets a 15-minute expiration (TTL)
+    - Extends expiration on each request
+    - Recreates token data after expiration
+  - Middleware:
+    - Allows the request to proceed when a token is available
+    - Returns `429` when no token is available
+    - Does not forward rejected requests
 - `tests/api-key.test.ts` — API key generation (non-empty, stable across calls, generated only once)
-
-The tests use `jest.useFakeTimers()` and `jest.advanceTimersByTime()` to simulate the passage of time when verifying refill behavior.
 
 ## Milestones
 
 - [x] **Milestone 1** — Basic Reverse Proxy (Gateway forwards requests to Target API)
 - [x] **Milestone 2** — API Key Authentication (ephemeral Bearer key, `/get-api`, Scalar docs, 401 for invalid requests)
 - [x] **Milestone 3** — Token Bucket Rate Limiting
-- [ ] **Milestone 4** — Redis Lua Scripts
+- [x] **Milestone 4** — Redis-backed Atomic Token Bucket (Lua script, Hash storage, TTL)
 - [ ] **Milestone 5** — Concurrency Handling
 - [ ] **Milestone 6** — k6 Performance Benchmarks
