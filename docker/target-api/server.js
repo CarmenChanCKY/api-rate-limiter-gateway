@@ -32,6 +32,10 @@ app.get("/", (_req, res) => {
  *     responses:
  *       200:
  *         description: A sample user object
+ *       401:
+ *         description: Missing or invalid API key
+ *       429:
+ *         description: Too many requests
  */
 app.get("/api/users", (_req, res) => {
   res.json({
@@ -54,6 +58,7 @@ app.get("/api/users", (_req, res) => {
  *         required: true
  *         schema:
  *           type: string
+ *         example: "123"
  *         description: The user ID
  *     responses:
  *       200:
@@ -75,6 +80,17 @@ app.get("/api/users/:id", (_req, res) => {
  *         application/json:
  *           schema:
  *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: Alice
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: alice@example.com
+ *             required:
+ *               - name
+ *               - email
  *     responses:
  *       200:
  *         description: User created

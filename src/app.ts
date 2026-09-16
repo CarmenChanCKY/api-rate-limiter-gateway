@@ -79,10 +79,21 @@ const bufferBody = (req: Request): Promise<Buffer<ArrayBuffer> | undefined> => {
  *   get:
  *     tags: [Getting Started]
  *     summary: Get the API key
- *     description: Returns the current runtime API key. No authentication required.
+ *     description: |
+ *       Returns the current runtime API key.
+ *
+ *       No authentication is required.
+ *       Copy the returned API key and use the Authorize button
+ *       to authenticate requests to protected endpoints.
+ *     security: []
  *     responses:
  *       200:
  *         description: The API key for authenticated requests
+ *         content:
+ *           text/plain:
+ *             schema:
+ *               type: string
+ *               example: mocked-key-001
  */
 app.get("/get-api", (_req: Request, res: Response) => {
   return res.status(200).send(getAPIKey());
