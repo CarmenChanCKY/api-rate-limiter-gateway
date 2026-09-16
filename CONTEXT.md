@@ -33,22 +33,11 @@ For the initial setup, only prepare the project foundation:
 - Make sure all services can start successfully with Docker Compose.
 - Add a basic `/health` endpoint (returns `{status: "ok"}`).
 
-## Important Constraints
+## Constraints
 
-The following features are intentionally deferred until their respective milestones:
-
-- Token Bucket
-- Rate limiting
-- Redis Lua scripts
-- Authentication
-- Concurrency handling
-- k6 benchmarks
-
-These will be implemented manually later.
-
-Do not add unnecessary frameworks, libraries, or infrastructure.
-
-Keep the initial project setup simple and easy to understand.
+- Developer implements core technical logic manually.
+- AI assists with setup, troubleshooting, explanations, review, and test design.
+- Avoid unnecessary frameworks or over-engineering.
 
 ## Tooling & Development
 
@@ -529,31 +518,11 @@ Replace the in-memory bucket state with Redis and make the bucket update atomic 
 
    Concurrency testing is deferred to M5.
 
-## Implemented
+### Milestone 5 — Concurrency Testing
+Status: Completed
 
-- Gateway HTTP server
-- Target API stub service
-- Basic reverse proxy forwarding
-- Request/response forwarding between Gateway and Target API
-- Docker Compose networking between services
-- Basic test endpoint
-- API Key authentication
-- Generate API Key at startup
-- Authenticate all proxied requests
-- Scalar API Documentation
-- Add `/get-api` endpoint
-- Rate Limit Configuration
-- Token Bucket Logic
-- In-memory per-API-key bucket state
-- Lazy token refill
-- Fractional token support
-- 429 response when no token is available
-- Token Bucket tests
-- Rate Limiter middleware tests
-- Redis-backed bucket state
-- Redis Hash bucket storage
-- Redis Lua atomic token bucket update
-- Redis TIME-based refill calculation
-- Redis bucket TTL
-- Bucket expiration and recreation
-- Redis Token Bucket integration tests
+- `Promise.all()` concurrent operations
+- 20 concurrent → 21st rejected
+- Refill + concurrent requests
+- Two concurrent requests competing for the last token
+- Verified success/rejection counts and final bucket state

@@ -79,7 +79,7 @@ export async function connectRedis(
           parser: CommandParser,
           ...args: Array<any>
         ): void {
-          parser.pushVariadic(args.flat())
+          parser.pushVariadic(args.flat());
         },
         transformReply: function (
           this: void,
@@ -109,5 +109,17 @@ export async function disconnectRedis(): Promise<void> {
   if (redisClient) {
     await redisClient.quit();
     redisClient = null;
+  }
+}
+
+export async function getRedisMilliseconds() {
+  if (redisClient) {
+    const [seconds, microseconds] = await redisClient.time();
+    return (
+      parseInt(seconds || "0") * 1000 +
+      Math.floor(parseInt(microseconds || "0") / 1000)
+    );
+  } else {
+    return Date.now();
   }
 }

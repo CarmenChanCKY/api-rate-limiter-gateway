@@ -164,6 +164,7 @@ src/
 tests/
   api-key.test.ts     # API key generation tests
   rate-limiter.test.ts# Token Bucket (Redis Lua) and rate limiter middleware tests
+  rate-limiter-concurrency.test.ts# Concurrency tests under concurrent load
 
 docker/
   target-api/
@@ -178,7 +179,7 @@ docker-compose.yml    # Service orchestration
 - All proxied requests pass through `verify-api-key`, which validates the `Authorization: Bearer <api-key>` header.
 - Missing or invalid → `401 Unauthorized`.
 - Valid → the Token Bucket rate limiter decides whether to allow or reject the request.
-- Each rate limit decision calls `updateTokenAmount()`, which runs a Redis Lua script that reads the bucket's Hash (`rate_limiter:<api-key>`), refills tokens based on elapsed Redis time, consumes a token if available, updates `lastRefillTime`, and refreshes the 15-minute TTL in one atomic operation.
+- Each rate limit decision calls `updateTokenAmount()`, which runs a Redis Lua script that reads the bucket's Hash (`rate_limiter:<api-key>`), refills tokens based on elapsed Redis time, consumes a token if available, updates `lastRefillTime`, and refreshes the 15-minute TTL in one atomic operation. The Lua script ensures that concurrent requests are serialized at the Redis level, preventing token over-consumption.
 - Token available → reverse proxy buffers the body and forwards the request to the Target API via `fetch`.
 - No token available → `429 Too Many Requests`.
 - Hop-by-hop headers (`connection`, `upgrade`, `authorization`, etc.) are stripped; all others are forwarded as-is.
@@ -202,9 +203,10 @@ rate_limiter:<api-key>
 
 ## Testing
 
-Tests are written with **Jest** and split into two groups:
+Tests are written with **Jest** and split into three groups:
 
 - **Token Bucket — Redis integration tests.** These exercise the real Lua script against a real Redis instance (database index 1) and cover token consumption, lazy refill, capacity limits, fractional tokens, per-API-key isolation, key expiration, and TTL refresh/recreation.
+- **Concurrency tests.** These verify atomic behavior under concurrent load using `Promise.all()` (database index 2): 20 concurrent requests all succeed with the 21st rejected, refilled tokens consumed concurrently, and two requests competing for the last token correctly yield one success and one rejection.
 - **Middleware unit tests.** These mock `updateTokenAmount()` so the middleware behavior (allowing/rejecting/failing closed) is tested in isolation.
 
 A running Redis instance is required for the integration tests. Run all tests with:
@@ -232,6 +234,10 @@ The `tests/` directory:
     - Allows the request to proceed when a token is available
     - Returns `429` when no token is available
     - Does not forward rejected requests
+- `tests/rate-limiter-concurrency.test.ts` — Concurrency tests verifying atomic behavior under concurrent load
+  - Allows 20 concurrent requests and rejects the 21st
+  - Allows refilled tokens to be consumed by concurrent requests
+  - Allows only one request when two concurrent requests compete for the last token
 - `tests/api-key.test.ts` — API key generation (non-empty, stable across calls, generated only once)
 
 ## Milestones
@@ -240,5 +246,5 @@ The `tests/` directory:
 - [x] **Milestone 2** — API Key Authentication (ephemeral Bearer key, `/get-api`, Scalar docs, 401 for invalid requests)
 - [x] **Milestone 3** — Token Bucket Rate Limiting
 - [x] **Milestone 4** — Redis-backed Atomic Token Bucket (Lua script, Hash storage, TTL)
-- [ ] **Milestone 5** — Concurrency Handling
+- [x] **Milestone 5** — Concurrency Handling (atomic Lua script prevents token over-consumption under concurrent requests)
 - [ ] **Milestone 6** — k6 Performance Benchmarks

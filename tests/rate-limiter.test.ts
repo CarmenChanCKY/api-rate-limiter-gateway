@@ -11,6 +11,7 @@ import { type Request, type Response, type NextFunction } from "express";
 import {
   connectRedis,
   disconnectRedis,
+  getRedisMilliseconds,
   type RedisClientWithScripts,
 } from "../src/config/redis.js";
 import { config } from "../src/config/env.js";
@@ -21,11 +22,6 @@ const expectedCapacity = 20;
 
 describe("Token Bucket", () => {
   let client: RedisClientWithScripts;
-
-  const getRedisMilliseconds = async () => {
-    const [seconds, microseconds] = await client.time();
-    return parseInt(seconds) * 1000 + Math.floor(parseInt(microseconds) / 1000);
-  };
 
   beforeAll(async () => {
     // connect to redis /1 namespace
@@ -245,6 +241,7 @@ describe("Token Bucket", () => {
   });
 
   afterAll(async () => {
+    await client.flushDb();
     await disconnectRedis();
   });
 });
@@ -253,6 +250,13 @@ describe("Rate Limiter Middleware", () => {
   let request: Partial<Request>;
   let response: Partial<Response>;
   let next: NextFunction;
+
+  let client: RedisClientWithScripts;
+
+  beforeAll(async () => {
+    // connect to redis /1 namespace
+    client = await connectRedis(`${config.redisUrl}/3`);
+  });
 
   beforeEach(() => {
     request = {};
@@ -341,5 +345,10 @@ describe("Rate Limiter Middleware", () => {
     await rateLimiter(request as Request, response as Response, next);
 
     expect(next).not.toHaveBeenCalled();
+  });
+
+  afterAll(async () => {
+    await client.flushDb();
+    await disconnectRedis();
   });
 });
