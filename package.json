@@ -12,7 +12,14 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "test": "NODE_OPTIONS=--experimental-vm-modules jest"
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+    "k6:basic": "docker compose run --rm k6 run /app/basic-load.ts",
+    "k6:load-test": "docker compose run --rm k6 run /app/load-test.ts",
+    "k6:rate-limiter": "docker compose run --rm k6 run /app/rate-limiter-under-load.ts",
+    "k6:traffic": "docker compose run --rm k6 run /app/different-traffic-pattern.ts",
+    "k6:traffic:steady": "docker compose run --rm -e SCENARIO=steady_scenario k6 run /app/different-traffic-pattern.ts",
+    "k6:traffic:burst": "docker compose run --rm -e SCENARIO=burst_scenario k6 run /app/different-traffic-pattern.ts",
+    "k6:traffic:ramp-up": "docker compose run --rm -e SCENARIO=rampUp_scenario k6 run /app/different-traffic-pattern.ts"
   },
   "dependencies": {
     "@scalar/express-api-reference": "^0.10.17",
@@ -23,6 +30,7 @@
   "devDependencies": {
     "@types/express": "^5.0.2",
     "@types/jest": "^29.5.14",
+    "@types/k6": "^2.2.1",
     "@types/node": "^24.0.3",
     "@types/swagger-jsdoc": "^6.0.4",
     "jest": "^30.4.2",

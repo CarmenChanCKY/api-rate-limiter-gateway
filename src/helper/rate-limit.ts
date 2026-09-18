@@ -1,6 +1,7 @@
+import { config } from "../config/env.js";
 import { connectRedis } from "../config/redis.js";
 
-export const getKey = (apiKey: string, dbKey: string = "rate_limiter"): string => {
+export const getKey = (apiKey: string, dbKey: string = config.bucketPrefix): string => {
   return `${dbKey}:${apiKey}`;
 };
 

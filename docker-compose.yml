@@ -22,3 +22,14 @@ services:
     build: docker/target-api
     ports:
       - "${TARGET_API_PORT}:4000"
+
+  k6:
+    build: docker/k6
+    environment:
+      - REDIS_URL=${REDIS_URL}
+      - BUCKET_PREFIX=${BUCKET_PREFIX}
+    depends_on:
+      - gateway
+      - redis
+    volumes:
+      - ./k6:/app:ro

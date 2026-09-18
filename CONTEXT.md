@@ -526,3 +526,51 @@ Status: Completed
 - Refill + concurrent requests
 - Two concurrent requests competing for the last token
 - Verified success/rejection counts and final bucket state
+
+
+**### Milestone 6 — Performance Testing**
+
+Status: completed
+
+Use k6 to measure the Gateway's performance under different traffic conditions.
+
+#### M6.1 — Basic Load Test
+
+* Run basic load tests with k6.
+* Measure throughput, latency, and success rate.
+
+#### M6.2 — Increase Load
+
+* Gradually increase the number of VUs.
+* Observe how throughput and latency change under higher load.
+
+#### M6.3 — Rate Limiter Under Load
+
+* Test the Redis-backed rate limiter under concurrent load.
+* Observe accepted and rate-limited (429) requests.
+* Verify rate limiting continues to work under load.
+
+#### M6.4 — Multiple API Keys / Traffic Patterns
+
+* Test multiple API keys concurrently.
+* Verify each API key has an independent rate-limit bucket.
+* Test different traffic patterns such as steady and bursty traffic.
+
+#### M6.5 — Record and Summarize Results
+
+* Record test configuration and results.
+* Summarize throughput, latency, and success/rejection counts.
+* Compare results between different tests.
+
+#### M6 Scope
+
+M6 focuses on:
+
+* k6 performance testing
+* Load testing
+* Throughput and latency
+* Rate limiter behavior under load
+* Multiple API keys and traffic patterns
+* Recording and interpreting results
+
+M6 focuses on measuring system behavior rather than optimization.
