@@ -575,9 +575,9 @@ M6 focuses on:
 
 M6 focuses on measuring system behavior rather than optimization.
 
-### Milestone 7 — Multi-Key for Deploy (In Progress)
+### Milestone 7 — Multi-Key for Deploy
 
-Status: Planned, not implemented. Code changes by developer, infra/nginx by AI.
+Status: Code + tests + infra files done; pending EC2 creation and live verification.
 
 Background: M2 singleton (`let apiKey` in `src/helper/api-key.ts`, pre-generated in `src/server.ts`, `GET /get-api` always returns same key) means all browsers share one key and one `rate_limiter:<key>` bucket. Not suitable for public deploy where recruiter opens multiple browsers.
 
@@ -606,7 +606,11 @@ Infra scope (AI):
 - `docker-compose.prod.yml`: `restart: unless-stopped` all services, `redis-data:/data` volume, remove host `ports:` for `redis`/`target-api`, `gateway` only `expose: ["3000"]`, add `nginx` service (`80:80`, `443:443`, mount `nginx.conf` + `certs`).
 - `nginx/nginx.conf`: single `server { server_name rate-limiter.ckying.com; }`, `proxy_pass http://gateway:3000`, forward `Host / X-Real-IP / X-Forwarded-For / X-Forwarded-Proto / Authorization`, `limit_req` reference budget 20r/s (`burst=30`), `listen 80` → `301 https://`.
 - `.env.example` + deploy runbook: new env samples, `docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d`, `nginx -t`, log checks, Scalar `https://rate-limiter.ckying.com/api-docs`.
-- Open items: new EC2 OS/IP/docker status (Q12, machine not yet created); cert resolved — existing cert confirmed wildcard (`DNS:*.ckying.com`), reuse via `scp`, no re-issue; numbers locked: TTL 86400, 5/hour/IP, 5 keys/IP, nginx burst 30 (Q14).
+- Open items: new EC2 OS/IP/docker status (Q12, machine not yet created).
+- Resolved: cert is wildcard (`DNS:*.ckying.com`) → reuse via `scp`, no re-issue (Q13);
+  numbers locked at TTL 86400, 5/hour/IP, 5 keys/IP, nginx burst 30 (Q14);
+  8GB gp3 (account EBS at 25/30GB free tier, ~$0.3/mo overage on credit);
+  Elastic IP required; SG 22(My IP)/80+443 open; folder perms mirror existing convention.
 
 Acceptance:
 - Two browsers `GET /get-api` get different keys; exhausting A to 429 leaves B at 200.

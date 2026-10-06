@@ -4,14 +4,40 @@ Target: a standalone EC2 hosting only this project.
 
 ## 0. One-time setup (new EC2)
 
-1. Ubuntu 24.04, Security Groups: open `22 / 80 / 443` only.
+1. Ubuntu 24.04, 8GB gp3 (25GB already used elsewhere in the account leaves
+   ~3GB over the 30GB free-tier total — about $0.3/mo, covered by credit).
+2. Security Groups (dedicated SG, e.g. `rate-limiter-sg` — do not share):
+   inbound `22` (SSH, source = My IP only), `80` + `443`
+   (source = `0.0.0.0/0` IPv4 and `::/0` IPv6); outbound stays default-open.
    `3000 / 6379 / 4000` stay closed — public traffic goes via nginx.
-2. Install Docker + compose plugin, then:
+3. Elastic IP: allocate + associate (free while attached; release on terminate),
+   otherwise the public IP changes on every stop/start and DNS breaks.
+   Use this static IP for the Cloudflare record below.
+4. Install Docker + compose plugin, add the SSH user to the `docker` group
+   (`sudo usermod -aG docker ubuntu`, then re-login), then:
    ```bash
    git clone <this-repo> /var/www/api-rate-limiter-gateway
    cd /var/www/api-rate-limiter-gateway
    ```
-3. DNS (Cloudflare): `A rate-limiter → <new-EC2-IP>`, proxied (orange cloud).
+5. DNS (Cloudflare): `A rate-limiter → <Elastic-IP>`, proxied (orange cloud).
+
+## 0b. Folder permissions (mirror the existing convention)
+
+```bash
+sudo chown -R ubuntu:ubuntu /var/www/api-rate-limiter-gateway
+find /var/www/api-rate-limiter-gateway -type d -exec chmod 755 {} \;
+find /var/www/api-rate-limiter-gateway -type f -exec chmod 644 {} \;
+chmod 600 /var/www/api-rate-limiter-gateway/.env
+
+sudo chown root:root /var/www/api-rate-limiter-gateway/nginx
+sudo chmod 755 /var/www/api-rate-limiter-gateway/nginx
+sudo chown root:root /var/www/api-rate-limiter-gateway/nginx/certs/authenticated_origin_pull_ca.pem
+sudo chmod 644 /var/www/api-rate-limiter-gateway/nginx/certs/authenticated_origin_pull_ca.pem
+sudo chown ubuntu:docker /var/www/api-rate-limiter-gateway/nginx/certs/ssl.crt
+sudo chmod 644 /var/www/api-rate-limiter-gateway/nginx/certs/ssl.crt
+sudo chown ubuntu:docker /var/www/api-rate-limiter-gateway/nginx/certs/ssl.key
+sudo chmod 600 /var/www/api-rate-limiter-gateway/nginx/certs/ssl.key
+```
 
 ## 1. Certs (wildcard reuse — confirmed `*.ckying.com`)
 

@@ -43,7 +43,7 @@ The Gateway receives incoming HTTP requests and forwards them to the Target API.
 Current request flow:
 
 ```
-GET /get-api → returns API key
+GET /get-api → mints a new independent API key (each call returns a different key)
 GET /api-docs → opens Scalar docs (no auth required)
 GET /api-docs.json → returns raw OpenAPI document
 Any proxied route → validate Authorization: Bearer <api-key>
@@ -95,7 +95,8 @@ The Gateway will be available at `http://localhost:3000`. You can also open the 
 
 ## Example Requests
 
-First, retrieve the ephemeral API key:
+First, mint a new API key (every call returns a different, independently
+rate-limited key; minting is limited to 5 keys/hour and 5 active keys per IP):
 
 ```
 curl http://localhost:3000/get-api
@@ -165,6 +166,9 @@ You can also test all endpoints through the Scalar documentation:
 | `BUCKET_PREFIX`  | `rate_limiter`                   | Redis key prefix for rate limiter buckets |
 | `TARGET_API_PORT`| `4000`                           | Target API port              |
 | `TARGET_API_URL` | `http://target-api:4000`         | Target API URL               |
+| `API_KEY_TTL`    | `86400` (24h)                    | API key expiry in seconds (sliding on each use) |
+| `MINT_LIMIT_PER_HOUR` | `5`                         | Max `/get-api` mints per IP per hour (anti-abuse) |
+| `MAX_KEYS_PER_IP` | `5`                            | Max tracked keys per IP (anti-abuse) |
 
 ## Project Structure
 
@@ -187,9 +191,11 @@ src/
     express.d.ts      # Express type declarations
 
 tests/
-  api-key.test.ts     # API key generation tests
-  rate-limiter.test.ts# Token Bucket (Redis Lua) and rate limiter middleware tests
-  rate-limiter-concurrency.test.ts# Concurrency tests under concurrent load
+  api-key.test.ts     # mint/isValid API key tests (Redis DB 4): roundtrip, per-call uniqueness, sliding TTL, mint limits
+  verify-api-key.test.ts # Bearer parsing + 401 cases (mocked isValidAPIKey)
+  get-api.test.ts     # HTTP-level /get-api tests (Redis DB 5): different keys per IP, 429 mapping, isolation
+  rate-limiter.test.ts# Token Bucket (Redis Lua, DB 1) and rate limiter middleware tests (mocked bucket, incl. 401 without key)
+  rate-limiter-concurrency.test.ts# Concurrency tests under concurrent load (Redis DB 2)
 
 docker/
   target-api/
@@ -204,14 +210,23 @@ k6/
   different-traffic-pattern.ts# k6 steady / burst / ramp-up traffic scenarios
 
 Dockerfile            # Multi-stage build for Gateway
-docker-compose.yml    # Service orchestration
+docker-compose.yml    # Service orchestration (local dev)
+docker-compose.prod.yml # Production overlay (new EC2): restart policies, redis volume, nginx, M7 env vars
+nginx/
+  nginx.conf          # Standalone reverse proxy for rate-limiter.ckying.com (prod only, certs gitignored)
+DEPLOY.md             # EC2 deploy runbook (DNS, certs, SG, permissions, acceptance)
 ```
 
 ## How It Works
 
 Every proxied request passes through API key authentication, then the rate limiter, then the reverse proxy:
 
-- `verify-api-key` validates the `Authorization: Bearer <api-key>` header. Missing or invalid → `401 Unauthorized`.
+- `verify-api-key` parses `Authorization: Bearer <api-key>` (case-insensitive,
+  tolerant of extra whitespace) and checks it against the Redis key set
+  (`api_key:<raw>`, 24h sliding TTL). Missing or invalid → `401 Unauthorized`.
+  The raw key is attached to the request for the rate limiter, so bucket names
+  never contain the `Bearer ` prefix. Minting itself is abuse-guarded per IP
+  (5 mints/hour, max 5 tracked keys); excess mints → `429`.
 - The rate limiter calls `updateTokenAmount()`, which runs a Redis Lua script operating on the API key's bucket Hash in one atomic step:
 
   ```text
@@ -229,13 +244,18 @@ Every proxied request passes through API key authentication, then the rate limit
 
 ## Testing
 
-Tests are written with **Jest** and split into three groups:
+Tests are written with **Jest** and split into groups:
 
-- **Token Bucket — Redis integration tests** (`tests/rate-limiter.test.ts`). These exercise the real Lua script against a real Redis instance (database index 1) and cover token consumption, lazy refill, capacity limits, fractional tokens, per-API-key isolation, key expiration, and TTL refresh/recreation.
-- **Concurrency tests** (`tests/rate-limiter-concurrency.test.ts`). These verify atomic behavior under concurrent load using `Promise.all()` (database index 2): 20 concurrent requests all succeed with the 21st rejected, refilled tokens consumed concurrently, and two requests competing for the last token correctly yield one success and one rejection.
-- **Middleware unit tests** (`tests/rate-limiter.test.ts`). These mock `updateTokenAmount()` so the middleware behavior (allowing/rejecting/failing closed) is tested in isolation.
-
-API key generation is covered in `tests/api-key.test.ts` (non-empty, stable across calls, generated only once).
+- **Multi-key API key tests** (`tests/api-key.test.ts`, Redis DB 4). Mint/isValid
+  roundtrip, per-call uniqueness (per-browser isolation), unknown-key rejection,
+  sliding TTL refresh, per-IP hourly mint limit, and max-keys-per-IP limit.
+- **Verify + route tests**. `tests/verify-api-key.test.ts` mocks `isValidAPIKey`
+  to cover Bearer parsing edge cases and 401s. `tests/get-api.test.ts` runs the
+  real Express app on an ephemeral port (Redis DB 5) to verify different keys
+  per IP, `MINT_LIMIT → 429` mapping, and cross-IP isolation.
+- **Token Bucket — Redis integration tests** (`tests/rate-limiter.test.ts`, DB 1). These exercise the real Lua script against a real Redis instance and cover token consumption, lazy refill, capacity limits, fractional tokens, per-API-key isolation, key expiration, and TTL refresh/recreation.
+- **Concurrency tests** (`tests/rate-limiter-concurrency.test.ts`, DB 2). These verify atomic behavior under concurrent load using `Promise.all()`: 20 concurrent requests all succeed with the 21st rejected, refilled tokens consumed concurrently, and two requests competing for the last token correctly yield one success and one rejection.
+- **Middleware unit tests** (`tests/rate-limiter.test.ts`). These mock `updateTokenAmount()` so the middleware behavior is tested in isolation: token available → `next()`, exhausted → 429, missing key (verify step skipped) → 401 without touching Redis.
 
 A running Redis instance is required for the integration tests:
 
@@ -283,3 +303,11 @@ The `k6/` scripts:
 - [x] **Milestone 4** — Redis-backed Atomic Token Bucket (Lua script, Hash storage, TTL)
 - [x] **Milestone 5** — Concurrency Handling (atomic Lua script prevents token over-consumption under concurrent requests)
 - [x] **Milestone 6** — k6 Performance Benchmarks (basic load, increased load, rate limiter under load, multiple traffic patterns)
+- [x] **Milestone 7** — Multi-Key for Deploy (per-browser keys in Redis + mint abuse guards + standalone EC2 at `rate-limiter.ckying.com`; see `CONTEXT.md` / `DEPLOY.md`)
+
+> **k6 caveat after M7:** `/get-api` now mints at most 5 keys/hour per IP.
+> `load-test.ts` (10 VUs × 30s against `/get-api` from one container IP) will
+> see mostly `429` after the first 5 mints — it no longer measures issuance
+> throughput. `basic-load.ts` (5 iterations) sits exactly on the limit.
+> `rate-limiter-under-load.ts` / `different-traffic-pattern.ts` mint once in
+> `setup()` and are unaffected.
