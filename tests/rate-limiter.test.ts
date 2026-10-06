@@ -15,8 +15,8 @@ import {
   type RedisClientWithScripts,
 } from "../src/config/redis.js";
 import { config } from "../src/config/env.js";
-import { getKey } from "../src/helper/rate-limit.js";
 import { setTimeout } from "timers/promises";
+import { getKey } from "../src/helper/rate-limit.js";
 
 const expectedCapacity = 20;
 
@@ -267,7 +267,7 @@ describe("Rate Limiter Middleware", () => {
   test("allows request when token is available", async () => {
     jest.resetModules();
 
-    const updateTokenAmount = jest.fn(() => {
+    const updateTokenAmount = jest.fn((_apiKey: string) => {
       return true;
     });
 
@@ -275,11 +275,14 @@ describe("Rate Limiter Middleware", () => {
       default: updateTokenAmount,
     }));
 
-    // fake request header
+    // apiKey is set by verifyAPIKeys before rateLimiter runs
     request = {
-      header: jest.fn(
-        () => "Bearer mocked-key-001",
-      ) as unknown as Request["header"],
+      apiKey: "mocked-key-001",
+    } as unknown as Request;
+
+    response = {
+      status: jest.fn().mockReturnThis() as Response["status"],
+      json: jest.fn() as Response["json"],
     };
 
     const rateLimiter = (await import("../src/middleware/rate-limiter.js"))
@@ -287,6 +290,7 @@ describe("Rate Limiter Middleware", () => {
 
     await rateLimiter(request as Request, response as Response, next);
 
+    expect(updateTokenAmount).toHaveBeenCalledWith("mocked-key-001");
     expect(next).toHaveBeenCalledTimes(1);
   });
 
@@ -302,8 +306,8 @@ describe("Rate Limiter Middleware", () => {
     }));
 
     request = {
-      header: jest.fn(() => "") as unknown as Request["header"],
-    };
+      apiKey: "mocked-key-001",
+    } as unknown as Request;
 
     response = {
       status: jest.fn().mockReturnThis() as Response["status"],
@@ -319,6 +323,34 @@ describe("Rate Limiter Middleware", () => {
     expect(response.json).toHaveBeenCalled();
   });
 
+  test("returns 401 when verifyAPIKeys did not attach a key", async () => {
+    jest.resetModules();
+
+    const updateTokenAmount = jest.fn(() => {
+      return true;
+    });
+
+    jest.unstable_mockModule("../src/helper/rate-limit.js", () => ({
+      default: updateTokenAmount,
+    }));
+
+    request = {};
+
+    response = {
+      status: jest.fn().mockReturnThis() as Response["status"],
+      json: jest.fn() as Response["json"],
+    };
+
+    const rateLimiter = (await import("../src/middleware/rate-limiter.js"))
+      .default;
+
+    await rateLimiter(request as Request, response as Response, next);
+
+    expect(updateTokenAmount).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   test("does not forward rejected request", async () => {
     jest.resetModules();
 
@@ -331,8 +363,8 @@ describe("Rate Limiter Middleware", () => {
     }));
 
     request = {
-      header: jest.fn(() => "") as unknown as Request["header"],
-    };
+      apiKey: "mocked-key-001",
+    } as unknown as Request;
 
     response = {
       status: jest.fn().mockReturnThis() as Response["status"],

@@ -3,11 +3,12 @@ import { apiReference } from "@scalar/express-api-reference";
 import swaggerJsdoc from "swagger-jsdoc";
 import { config } from "./config/env.js";
 import { swaggerOptions } from "./config/swagger.js";
-import { getAPIKey } from "./helper/api-key.js";
+import { mintAPIKey } from "./helper/api-key.js";
 import verifyAPIKeys from "./middleware/verify-api-key.js";
 import rateLimiter from "./middleware/rate-limiter.js";
 
 const app = express();
+app.set("trust proxy", 1);
 
 const filterHeaders = (
   headerList: Headers | [string, unknown][],
@@ -80,7 +81,7 @@ const bufferBody = (req: Request): Promise<Buffer<ArrayBuffer> | undefined> => {
  *     tags: [Getting Started]
  *     summary: Get the API key
  *     description: |
- *       Returns the current runtime API key.
+ *       Mints a new independent key.
  *
  *       No authentication is required.
  *       Copy the returned API key and use the Authorize button
@@ -95,8 +96,20 @@ const bufferBody = (req: Request): Promise<Buffer<ArrayBuffer> | undefined> => {
  *               type: string
  *               example: mocked-key-001
  */
-app.get("/get-api", (_req: Request, res: Response) => {
-  return res.status(200).send(getAPIKey());
+app.get("/get-api", async (_req: Request, res: Response) => {
+  // get ip address
+  const ip =
+    (_req.headers["cf-connecting-ip"] as string)?.split(",")[0]?.trim() ||
+    (_req.ip ?? _req.socket.remoteAddress ?? "unknown");
+
+  try {
+    return res.status(200).send(await mintAPIKey(ip));
+  } catch (e) {
+    if ((e as Error).message === "MINT_LIMIT") {
+      return res.status(429).json({ success: false, message: "Too many keys" });
+    }
+    return res.status(500).json({ success: false, message: "Internal error" });
+  }
 });
 
 const spec = swaggerJsdoc(swaggerOptions);

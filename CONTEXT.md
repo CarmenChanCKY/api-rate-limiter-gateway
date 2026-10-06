@@ -574,3 +574,41 @@ M6 focuses on:
 * Recording and interpreting results
 
 M6 focuses on measuring system behavior rather than optimization.
+
+### Milestone 7 — Multi-Key for Deploy (In Progress)
+
+Status: Planned, not implemented. Code changes by developer, infra/nginx by AI.
+
+Background: M2 singleton (`let apiKey` in `src/helper/api-key.ts`, pre-generated in `src/server.ts`, `GET /get-api` always returns same key) means all browsers share one key and one `rate_limiter:<key>` bucket. Not suitable for public deploy where recruiter opens multiple browsers.
+
+Agreed decisions (grill Q1-Q11):
+- Use case: recruiter instant trial, will open multiple browsers.
+- Q2: each `GET /get-api` mints a different independent key (per-browser isolation, otherwise meaningless).
+- Q3: all minted keys stay valid + expiry (no single-rotation).
+- Q4: valid key set stored in Redis (not memory), so restart / multi-instance works.
+- Q5/Q11: standalone EC2 (free credit), whole `docker-compose.yml` as-is, no port hassle. The other existing machine is untouched.
+- Q6 abuse: A+B. A: per-IP mint limit on `/get-api` (e.g. 5/hour). B: max active keys per IP (e.g. 5). C (global ceiling) not done. TTL alone insufficient.
+- Subdomain: `rate-limiter.ckying.com` under same `ckying.com` (new `A` record, Cloudflare proxied).
+- Reverse proxy: nginx (not Caddy), new machine own `nginx/nginx.conf` + `docker-compose.prod.yml` override.
+- Split: code changes by developer, infra/nginx/deploy files by AI. AI reviews code before touching infra.
+
+Code contract (must hold or infra breaks):
+- `GET /get-api` stays `GET → 200 text/plain` raw key (no JSON change).
+- Env names: `API_KEY_TTL` (default 86400 = 24h), `MINT_LIMIT_PER_HOUR` (default 5), `MAX_KEYS_PER_IP` (default 5), plus existing `PORT / REDIS_URL / TARGET_API_URL`.
+- Container names: `gateway:3000`, `redis:6379`, `target-api:4000` unchanged (`proxy_pass http://gateway:3000` hardcodes this).
+- Auth: strip `Bearer ` prefix before Redis lookup; `api_key:<raw>` / `rate_limiter:<raw>` (no `Bearer ` in key). `verify-api-key` becomes async Redis `EXISTS` check.
+- `app.set('trust proxy', 1)` required so per-IP limit sees real IP behind nginx/Cloudflare (`CF-Connecting-IP` / `X-Forwarded-For` must be forwarded, incl. `Authorization`).
+- Redis schema (proposed): `api_key:<raw>` string `1` with `EX TTL`; `ip_keys:<ip>` set for B; `mint_limit:<ip>` counter with `EXPIRE 3600` for A.
+- `src/server.ts` no longer pre-generates a global key.
+- Tests: `tests/api-key.test.ts` singleton asserts must be replaced (mint-twice-different + mocked Redis); rate-limiter tests use raw key format.
+
+Infra scope (AI):
+- `docker-compose.prod.yml`: `restart: unless-stopped` all services, `redis-data:/data` volume, remove host `ports:` for `redis`/`target-api`, `gateway` only `expose: ["3000"]`, add `nginx` service (`80:80`, `443:443`, mount `nginx.conf` + `certs`).
+- `nginx/nginx.conf`: single `server { server_name rate-limiter.ckying.com; }`, `proxy_pass http://gateway:3000`, forward `Host / X-Real-IP / X-Forwarded-For / X-Forwarded-Proto / Authorization`, `limit_req` reference budget 20r/s (`burst=30`), `listen 80` → `301 https://`.
+- `.env.example` + deploy runbook: new env samples, `docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d`, `nginx -t`, log checks, Scalar `https://rate-limiter.ckying.com/api-docs`.
+- Open items: new EC2 OS/IP/docker status (Q12, machine not yet created); cert resolved — existing cert confirmed wildcard (`DNS:*.ckying.com`), reuse via `scp`, no re-issue; numbers locked: TTL 86400, 5/hour/IP, 5 keys/IP, nginx burst 30 (Q14).
+
+Acceptance:
+- Two browsers `GET /get-api` get different keys; exhausting A to 429 leaves B at 200.
+- 6th mint same IP within hour → 429; 6th active key same IP → reject.
+- `docker compose logs -f gateway` shows listening + Redis connected; Scalar Authorize works.

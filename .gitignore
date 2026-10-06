@@ -26,6 +26,9 @@ Thumbs.db
 # Docker
 docker-compose.override.yml
 
+# Prod TLS (Cloudflare origin cert + key, private — see DEPLOY.md)
+nginx/certs/
+
 # Test coverage
 coverage/
 

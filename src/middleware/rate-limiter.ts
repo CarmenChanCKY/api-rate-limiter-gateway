@@ -6,7 +6,10 @@ const rateLimiter = async (
   res: Response,
   next: NextFunction,
 ) => {
-  let receiveAPIKey: string = _req.header("authorization") || "";
+  let receiveAPIKey: string = (_req as any).apiKey ?? "";
+  if (!receiveAPIKey) {
+    return res.status(401).json({ success: false, message: "Invalid API Key" });
+  }
 
   const limitResult = await updateTokenAmount(receiveAPIKey);
 

@@ -1,9 +1,17 @@
 import { type Request, type Response, type NextFunction } from "express";
-import { getAPIKey } from "../helper/api-key.js";
+import { isValidAPIKey } from "../helper/api-key.js";
 
-const verifyAPIKeys = (_req: Request, res: Response, next: NextFunction) => {
+const verifyAPIKeys = async (
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   let receiveAPIKey: string | undefined = _req.header("authorization");
-  if (receiveAPIKey && receiveAPIKey.trim() === `Bearer ${getAPIKey()}`) {
+
+  const m = receiveAPIKey?.trim().match(/^Bearer\s+(.+)$/i);
+  const apiKey = m?.[1]?.trim() ?? "";
+  if (await isValidAPIKey(apiKey)) {
+    (_req as any).apiKey = apiKey;
     return next();
   }
 

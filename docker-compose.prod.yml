@@ -1,0 +1,46 @@
+# Production overlay for the NEW EC2 (rate-limiter.ckying.com).
+# Local dev is untouched: keep using `docker compose up` as before.
+#
+# Usage on EC2:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d gateway redis target-api nginx
+#
+# Notes:
+# - Security Groups expose only 22/80/443, so the host-published dev ports
+#   (3000/6379/4000) stay unreachable from the internet. Public traffic
+#   goes through nginx only.
+# - k6 is intentionally NOT started in prod (see runbook service list).
+# - New M7 env vars are forwarded to gateway here so EC2 .env overrides apply.
+
+services:
+  gateway:
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - API_KEY_TTL=${API_KEY_TTL:-86400}
+      - MINT_LIMIT_PER_HOUR=${MINT_LIMIT_PER_HOUR:-5}
+      - MAX_KEYS_PER_IP=${MAX_KEYS_PER_IP:-5}
+      - BUCKET_PREFIX=${BUCKET_PREFIX:-rate_limiter}
+
+  redis:
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  target-api:
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+volumes:
+  redis-data:
