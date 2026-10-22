@@ -6,6 +6,10 @@
 
 Non-goals: response caching, clustering, DB persistence, full gateway features.
 
+Demo: [https://rate-limiter.ckying.com/api-docs#description/introduction](https://rate-limiter.ckying.com/api-docs#description/introduction)
+
+Blog: [https://myprogrammingjourney.ckying.com/#/tags/search/api-rate-limiter-gateway/](https://myprogrammingjourney.ckying.com/#/tags/search/api-rate-limiter-gateway/)
+
 ## Table of Contents
 
 - [API Rate Limiter \& Reverse Proxy Gateway](#api-rate-limiter--reverse-proxy-gateway)
