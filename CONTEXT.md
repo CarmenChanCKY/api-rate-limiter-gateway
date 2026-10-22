@@ -8,7 +8,7 @@ The project is a portfolio backend project built to practice Node.js, TypeScript
 
 ## Tech Stack
 
-- Node.js 24.19.0 (Active LTS)
+- Node.js 24.22.1 (Active LTS)
 - TypeScript ~5.9.x
 - Express.js 5.2.x
 - Redis (node-redis v8.2)
@@ -20,7 +20,7 @@ The project is a portfolio backend project built to practice Node.js, TypeScript
 
 For the initial setup, only prepare the project foundation:
 
-- Set up Dockerfile for the Gateway (pinned to Node 24.19.0-alpine, multi-stage build).
+- Set up Dockerfile for the Gateway (pinned to Node 24.22.1-alpine, multi-stage build).
 - Set up docker-compose.yml with:
   - Node.js + TypeScript environment
   - Gateway (port 3000)

@@ -8,20 +8,22 @@ Non-goals: response caching, clustering, DB persistence, full gateway features.
 
 ## Table of Contents
 
-- [Screenshots](#screenshots)
-- [Architecture](#architecture)
-- [Why Redis? (Map is faster)](#why-redis-map-is-faster)
-- [Tech Stack](#tech-stack)
-- [Getting Started](#getting-started)
-- [Example Requests](#example-requests)
-- [Available Scripts](#available-scripts)
-- [Services](#services)
-- [Environment Variables](#environment-variables)
-- [Project Structure](#project-structure)
-- [How It Works](#how-it-works)
-- [Testing](#testing)
-- [Performance Testing (k6)](#performance-testing-k6)
-- [Milestones](#milestones)
+- [API Rate Limiter \& Reverse Proxy Gateway](#api-rate-limiter--reverse-proxy-gateway)
+  - [Table of Contents](#table-of-contents)
+  - [Screenshots](#screenshots)
+  - [Architecture](#architecture)
+  - [Why Redis? (Map is faster)](#why-redis-map-is-faster)
+  - [Tech Stack](#tech-stack)
+  - [Getting Started](#getting-started)
+  - [Example Requests](#example-requests)
+  - [Available Scripts](#available-scripts)
+  - [Services](#services)
+  - [Environment Variables](#environment-variables)
+  - [Project Structure](#project-structure)
+  - [How It Works](#how-it-works)
+  - [Testing](#testing)
+  - [Performance Testing (k6)](#performance-testing-k6)
+  - [Milestones](#milestones)
 
 ## Screenshots
 
@@ -56,7 +58,7 @@ The extra ~1ms RTT is noise next to the proxy fetch to the Target API.
 
 ## Tech Stack
 
-- Node.js 24.19.0
+- Node.js 24.22.1
 - TypeScript ~5.9.x
 - Express.js 5.2.x
 - Redis (node-redis v6.x) with Lua scripts
@@ -66,7 +68,7 @@ The extra ~1ms RTT is noise next to the proxy fetch to the Target API.
 
 ## Getting Started
 
-Prerequisites: Node.js 24.19.0 (`nvm use`) + Docker & Docker Compose.
+Prerequisites: Node.js 24.22.1 (`nvm use`) + Docker & Docker Compose.
 
 ```bash
 git clone <repo-url>
